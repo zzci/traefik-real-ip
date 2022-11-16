@@ -23,7 +23,8 @@ type Proxy struct {
 
 // Config the plugin configuration.
 type Config struct {
-	Proxy []Proxy `yaml:"proxy"`
+	Proxy       []Proxy  `yaml:"proxy"`
+	SourceRange []string `yaml:"sourceRange,omitempty"`
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -33,31 +34,30 @@ func CreateConfig() *Config {
 
 // GetRealIP Define plugin
 type GetRealIP struct {
-	next  http.Handler
-	name  string
-	proxy []Proxy
+	next        http.Handler
+	name        string
+	proxy       []Proxy
+	allowLister *Checker
 }
 
 // New creates and returns a new realip plugin instance.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	fmt.Printf("☃️ All Config：'%v',Proxy Settings len: '%d'\n", config, len(config.Proxy))
-	
-	checker := false
-	
-	if len(config.SourceRange) != 0 {
-		checker, err := ip.NewChecker(config.SourceRange)
+
+	var err error
+	var checker *Checker
+
+	if len(config.SourceRange) > 0 {
+		checker, err = NewChecker(config.SourceRange)
 		if err != nil {
-			checker = false
-			fmt.Errorf("cannot parse CIDRs %s: %w", config.SourceRange, err)
+			return nil, fmt.Errorf("cannot parse CIDRs %s: %w", config.SourceRange, err)
 		}
 	}
 
-
-	
 	return &GetRealIP{
-		next:  next,
-		name:  name,
-		proxy: config.Proxy,
+		next:        next,
+		name:        name,
+		proxy:       config.Proxy,
 		allowLister: checker,
 	}, nil
 }
@@ -99,18 +99,18 @@ func (g *GetRealIP) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			break
 		}
 	}
-	if realIP != "" && g.allowLister != false {
+
+	if realIP != "" && g.allowLister != nil {
 		err := g.allowLister.IsAuthorized(realIP)
 		if err != nil {
-			msg := fmt.Sprintf("Rejecting IP %s: %v", clientIP, err)
-			logger.Debug(msg)
-			tracing.SetErrorWithEvent(req, msg)
-			reject(ctx, rw)
+			fmt.Printf("Rejecting IP %s: %v", realIP, err)
+
+			reject(rw)
 			return
 		}
-		logger.Debugf("Accepting IP %s", clientIP)
-
+		fmt.Printf("Accepting IP %s", realIP)
 	}
+
 	g.next.ServeHTTP(rw, req)
 }
 
@@ -118,4 +118,14 @@ func (g *GetRealIP) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 func (g *GetRealIP) excludedIP(s string) bool {
 	ip := net.ParseIP(s)
 	return ip == nil
+}
+
+func reject(rw http.ResponseWriter) {
+	statusCode := http.StatusForbidden
+
+	rw.WriteHeader(statusCode)
+	_, err := rw.Write([]byte(http.StatusText(statusCode)))
+	if err != nil {
+		fmt.Println("Failed to send reject: ", err.Error())
+	}
 }
