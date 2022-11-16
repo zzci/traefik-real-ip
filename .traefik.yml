@@ -1,0 +1,26 @@
+displayName: Traefik Get Real IP
+type: middleware
+
+import: github.com/zzci/traefik-real-ip
+
+summary: When traefik is deployed behind multiple load balancers, use this plugin to detect the different load balancers and get the real IP from different header fields
+
+testData:
+  Proxy:
+    - proxyHeadername: X-From-Cdn
+      proxyHeadervalue: cdn1
+      realIP: X-Forwarded-For
+    - proxyHeadername: X-From-Cdn
+      proxyHeadervalue: cdn2
+      realIP: Client-Ip
+    - proxyHeadername: X-From-Cdn
+      proxyHeadervalue: cdn3
+      realIP: Cf-Connecting-Ip
+      overwriteXFF: true
+    - proxyHeadername: "*"
+      realIP: RemoteAddr
+  sourceRange:
+    - "127.0.0.1"
+    - "192.168.0.0/16"
+    - "172.16.0.0/12"
+    - "10.0.0.0/8"
