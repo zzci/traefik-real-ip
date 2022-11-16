@@ -41,11 +41,24 @@ type GetRealIP struct {
 // New creates and returns a new realip plugin instance.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	fmt.Printf("☃️ All Config：'%v',Proxy Settings len: '%d'\n", config, len(config.Proxy))
+	
+	checker := false
+	
+	if len(config.SourceRange) != 0 {
+		checker, err := ip.NewChecker(config.SourceRange)
+		if err != nil {
+			checker = false
+			fmt.Errorf("cannot parse CIDRs %s: %w", config.SourceRange, err)
+		}
+	}
 
+
+	
 	return &GetRealIP{
 		next:  next,
 		name:  name,
 		proxy: config.Proxy,
+		allowLister: checker,
 	}, nil
 }
 
@@ -85,6 +98,18 @@ func (g *GetRealIP) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			req.Header.Set(xRealIP, realIP)
 			break
 		}
+	}
+	if realIP != "" && g.allowLister != false {
+		err := g.allowLister.IsAuthorized(realIP)
+		if err != nil {
+			msg := fmt.Sprintf("Rejecting IP %s: %v", clientIP, err)
+			logger.Debug(msg)
+			tracing.SetErrorWithEvent(req, msg)
+			reject(ctx, rw)
+			return
+		}
+		logger.Debugf("Accepting IP %s", clientIP)
+
 	}
 	g.next.ServeHTTP(rw, req)
 }
